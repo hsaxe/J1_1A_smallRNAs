@@ -1,0 +1,1056 @@
+---
+title: "Count_KanR_and_GUS"
+format: html
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load neccessary libraries
+
+```{r echo=TRUE}
+pacman::p_load(base,
+               data.table,
+               dplyr,
+               ggplot2,
+               ggprism,
+               ggtext,
+               kableExtra,
+               openxlsx,
+               sjPlot,
+               statmod,
+               stats,
+               stringr,
+               tibble,
+               tidytable,
+               tidytext,
+               tidyr,
+               utils,
+               webshot2)
+
+```
+
+## This code was to visualize Kan and GUS reads from the pre-processing step, but this has been incorporated into the genomic reference and DE analysis
+
+```{r}
+# dat = fread('KanR_and_GUS_counts.csv') %>% 
+#   rename(Sample = `Sample Name`) %>% 
+#   mutate(`% SE Hits` = `% SE Hits` * 100)
+# 
+# J1_19A = dat %>% 
+#   filter(Sample %like% 'walnut') %>% 
+#   # filter(!Sample %like% 'P') %>%
+#   mutate(Sample = gsub('J', '19A_', Sample) %>% 
+#                   gsub('walnut_smRNA_', 'J1_', .) %>% 
+#                   gsub('C', 'C_', .),
+#          Treatment = str_extract(Sample, 'J1_19A|J1_C'),
+#          Tissue = str_extract(Sample, 'R|S|U|K|P'),
+#          Treatment_Tissue = gsub('.$', '', Sample) %>% 
+#            factor(., levels = c('J1_19A_R', 'J1_19A_U', 'J1_19A_S', 'J1_19A_K', 'J1_19A_P',
+#                                 'J1_C_R', 'J1_C_U', 'J1_C_S', 'J1_C_K', 'J1_C_P')),
+#          Experiment = 'J1-19A')
+# 
+# J1_1A = dat %>% 
+#   filter(!Sample %like% 'walnut') %>% 
+#   mutate(Treatment = str_extract(Sample, 'J1-1A|J1-C') %>% 
+#            gsub('-', '\\.', .),
+#          Tissue = str_extract(Sample, 'R|S|U') %>% 
+#            factor(., levels = c('R', 'U', 'S')),
+#          Treatment_Tissue = paste(Treatment, Tissue, sep = '_') %>% 
+#            factor(., levels = c('J1.1A_R', 'J1.1A_U', 'J1.1A_S',
+#                                 'J1.C_R', 'J1.C_U', 'J1.C_S')),
+#          Experiment = 'J1-1A')
+```
+
+```{r}
+# both = J1_19A %>% 
+#   rbind(J1_1A) %>% 
+#   rename(`% Single End Hits` = `% SE Hits`,
+#          `Single End Hits` = `SE hits`)
+```
+
+```{r, fig.width=9, fig.height=8}
+# p = ggplot(both, aes(Treatment_Tissue, `Single End Hits`,
+#                    fill = Treatment_Tissue))+
+#   geom_boxplot(show.legend = F)+
+#   theme_prism(base_size = 15)+
+#   labs(title = 'KanR and GUS reads')+
+#   theme(axis.text.x = element_text(angle = 45,
+#                                    face = 'bold',
+#                                    vjust = 1,
+#                                    hjust = 1),
+#         plot.title = element_text(hjust = 0.5))+
+#   facet_wrap(Experiment~Notes, 
+#              scales = 'free_x')
+# 
+# p  
+```
+
+```{r, fig.width=9, fig.height=8}
+# p = ggplot(both, aes(Treatment_Tissue, `% Single End Hits`,
+#                    fill = Treatment_Tissue))+
+#   geom_boxplot(show.legend = F)+
+#   theme_prism(base_size = 15)+
+#   labs(title = 'KanR and GUS reads')+
+#   theme(axis.text.x = element_text(angle = 45,
+#                                    face = 'bold',
+#                                    vjust = 1,
+#                                    hjust = 1),
+#         plot.title = element_text(hjust = 0.5))+
+#   facet_wrap(Experiment~Notes, 
+#              scales = 'free_x')
+# 
+# p  
+```
+
+```{r}
+# save_plot('RNAseq_Figures_HJS/Fig_4.png',
+#           p,
+#           width = 20,
+#           height = 16)
+```
+
+## Get read counts that have been summarized by chromosome feature by sum
+
+```{r, fig.width=11, fig.height=6}
+long19A = fread('J1_19A/DGEresults/Fig3_19A_dat.csv') %>%
+  mutate(Experiment = 'J1-19A',
+         Treatment_Tissue = gsub('\\.', '_', Treatment_Tissue) %>%
+           factor(.,
+                  levels = c('J1_19A_R', 'J1_19A_U', 'J1_19A_S', 'J1_19A_K', 'J1_19A_P',
+                             'J1_C_R', 'J1_C_U', 'J1_C_S', 'J1_C_K', 'J1_C_P')),
+         Tissue = case_when(grepl('_P', Sample) ~ 'P',
+                            grepl('_K', Sample) ~ 'K',
+                            grepl('_S', Sample) ~ 'S',
+                            grepl('_U', Sample) ~ 'U',
+                            grepl('_R', Sample) ~ 'R',
+                            T ~ NA) %>% 
+           factor(., levels = c('R',
+                            'U',
+                            'S',
+                            'P',
+                            'K')),
+         Treatment = case_when(grepl('19A', Sample) ~ 'J1-19A',
+                               grepl('C', Sample) ~ 'J1-Wild Type Rootstock',
+                               T ~ NA),
+         Chromosome = factor(chromosome2,
+                              levels = c('J. regia',
+                                         'pDE00.0201',
+                                         'Ti',
+                                         'At', 
+                                         'circular',
+                                         'linear'))) %>% 
+  arrange(percent)
+
+long1A = fread('J1_1A/DGEresults/Fig3_1A_dat.csv') %>% 
+  mutate(Experiment = 'J1-1A Rootstock',
+         Treatment_Tissue = factor(Treatment_Tissue, levels = c('J1.1A_R', 'J1.1A_U', 'J1.1A_S',
+                                                                'J1.C_R', 'J1.C_U', 'J1.C_S')),
+         Tissue = case_when(grepl('_S', Treatment_Tissue) ~ 'S',
+                            grepl('_U', Treatment_Tissue) ~ 'U',
+                            grepl('_R', Treatment_Tissue) ~ 'R',
+                            T ~ NA) %>% 
+           factor(., levels = c('R',
+                                'U',
+                                'S')),
+         Treatment = case_when(grepl('1A', Sample) ~ 'J1-1A<br>Rootstock',
+                               grepl('C', Sample) ~ 'J1-Wild Type<br>Rootstock',
+                               T ~ NA) %>% 
+           factor(levels = c('J1-1A<br>Rootstock',
+                             'J1-Wild Type<br>Rootstock')),
+         Chromosome = case_when(chromosome2 == 'J. regia' ~ '<i>J. regia</i>',
+                                chromosome2 == 'pDE00.0201_resequenced' ~ 'T-DNA<br>(pDE00.0201)',
+                                chromosome2 == 'Ti' ~ 'pTiC58',
+                                chromosome2 == 'At' ~ 'pAtC58',
+                                chromosome2 == 'circular' ~ 'CC-C58',
+                                chromosome2 == 'linear' ~ 'LC-C58',
+                                T~NA) %>% 
+           factor(.,
+                  levels = c('<i>J. regia</i>',
+                             'T-DNA<br>(pDE00.0201)',
+                             'pTiC58',
+                             'pAtC58', 
+                             'CC-C58',
+                             'LC-C58')),
+         percent_of_total = format(percent_of_total, digits = 2) %>% 
+           as.numeric(.)
+         )
+
+long1A %>% 
+  summarise(sum = sum(sum_TPM),
+            .by = Sample)
+  
+
+# longboth = long19A %>% 
+#   rbind(long1A)
+```
+
+#### Make barplot of these summaries
+
+```{r, fig.width=11, fig.height=6}
+# colors = c('darkgreen',
+#            'red',
+#            'purple',
+#            'yellow',
+#            'blue',
+#            'orange')
+# 
+# p = ggplot(longboth, aes(Sample, percent,
+#                       fill = Chromosome))+
+#   geom_col(color = 'black',
+#            size = 0.5)+
+#   theme_prism(base_size = 15)+
+#   theme(axis.text.x = element_text(angle = 45,
+#                                    face = 'bold',
+#                                    vjust = 1,
+#                                    hjust = 1))+
+#   scale_fill_manual(values = colors)+
+#   facet_wrap(~Treatment_Tissue,
+#              ncol = 9,
+#              scales = 'free_x')
+# 
+# p
+```
+
+# New way to represent counts by Chromosome
+
+## J1-1A Rootstock
+
+```{r, fig.width=10, fig.height=15}
+
+p = ggplot(long1A,
+       aes(Tissue, sum_TPM))+
+  geom_boxplot()+
+  scale_fill_viridis_d(begin = 0.5, end = 1)+
+  theme_prism()+
+  ggtitle('Sum of TPM by Chromosome')+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(y = 'Transcripts Per Million (TPM)')+
+  theme(
+    plot.title = element_markdown(hjust = 0.5),
+    strip.text.y.right = element_text(angle = 0),
+    strip.text = element_markdown(size = 12)  # Use element_markdown to enable HTML
+  ) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  facet_wrap(Chromosome ~ Treatment,
+             scales = 'free_y',
+             axes = 'all',
+             axis.labels = 'all_x',
+             ncol = 2)
+
+p
+
+save_plot('Final_Figs_1A/Sum_TPM_by_Chromosome_1A.png',
+          p,
+          width = 25,
+          height = 35)
+```
+
+```{r, fig.width=10, fig.height=15}
+
+p = ggplot(long1A,
+       aes(Tissue, percent_of_total))+
+  geom_boxplot()+
+  scale_fill_viridis_d(begin = 0.5, end = 1)+
+  theme_prism()+
+  ggtitle('Percent of TPM by Chromosome')+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(y = 'Percent')+
+  theme(
+    plot.title = element_markdown(hjust = 0.5),
+    strip.text.y.right = element_text(angle = 0),
+    strip.text = element_markdown(size = 12)  # Use element_markdown to enable HTML
+  ) +
+  facet_wrap(Chromosome ~ Treatment,
+             scales = 'free_y',
+             axes = 'all',
+             axis.labels = 'all_x',
+             ncol = 2)
+
+p
+
+save_plot('Final_Figs_1A/Percent_Sum_TPM_by_Chromosome_1A.png',
+          p,
+          width = 25,
+          height = 35)
+```
+
+## J1-19A
+
+```{r, fig.width=10, fig.height=10}
+
+p = ggplot(long19A,
+       aes(Tissue, percent))+
+  geom_boxplot()+
+  scale_fill_viridis_d(begin = 0.5, end = 1)+
+  theme_prism()+
+  ggtitle('Percent of Total Reads by Chromosome')+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(y = 'Percent of Total Reads')+
+  facet_grid(Chromosome~Treatment,
+             scales = 'free',
+             axes = 'all',
+             axis.labels = 'all_x')
+
+p
+
+save_plot('RNAseq_Figures_HJS/Percent_Reads_by_Chromosome_19A.png',
+          p,
+          width = 25,
+          height = 25)
+```
+
+# Summarise counts by treatment, chromosome, and experiment into averages of sums and percentages of totals
+
+## J1-1A
+
+```{r}
+# df_list = list()
+# 
+# ## J1-1A
+# wide_1A_CTET = long1A %>%
+#   summarise(`Average Sum Counts` = mean(sum_counts),
+#             `Average Percent of Total Counts` = mean(percent),
+#             .by = c(Chromosome,
+#                     Tissue,
+#                     Experiment,
+#                     Treatment)) %>%
+#   pivot_wider(id_cols = everything(),
+#               names_from = Chromosome,
+#               values_from = c(`Average Sum Counts`, `Average Percent of Total Counts`)) %>%
+#   arrange(Tissue) %>%
+#   select(Tissue,
+#          Experiment,
+#          Treatment,
+#          starts_with('Average Percent'),
+#          starts_with('Average Sum')) %>%
+#   mutate(across(starts_with('Average Percent'), ~ formatC(.x,
+#                                                           digits = 3,
+#                                                           format = 'f')),
+#                 across(starts_with('Average sum'), ~ formatC(.x,
+#                                                              big.mark = ',',
+#                                                              digits = 0,
+#                                                              format = 'f')))
+# 
+# 
+# 
+# wide_1A_CTET_percents = wide_1A_CTET %>%
+#   select(Tissue,
+#          Treatment,
+#          `Average Percent of Total Counts_J. regia`,
+#          `Average Percent of Total Counts_pDE00.0201`,
+#          `Average Percent of Total Counts_At`,
+#          `Average Percent of Total Counts_Ti`,
+#          `Average Percent of Total Counts_circular`,
+#          `Average Percent of Total Counts_linear`)
+# ## Percents Control
+# df_list$wide_1A_CTET_percents_C = wide_1A_CTET_percents %>%
+#   filter(Treatment == 'Control')
+# ## Percents Transgenic
+# df_list$wide_1A_CTET_percents_T = wide_1A_CTET_percents %>%
+#   filter(Treatment == 'Transgenic')
+# 
+# wide_1A_CTET_sum_counts = wide_1A_CTET %>%
+#   select(Tissue,
+#          Treatment,
+#          `Average Sum Counts_J. regia`,
+#          `Average Sum Counts_pDE00.0201`,
+#          `Average Sum Counts_At`,
+#          `Average Sum Counts_Ti`,
+#          `Average Sum Counts_circular`,
+#          `Average Sum Counts_linear`)
+# ## Counts Control
+# df_list$wide_1A_CTET_sum_counts_C = wide_1A_CTET_sum_counts %>%
+#   filter(Treatment == 'Control')
+# ## Counts Transgenic
+# df_list$wide_1A_CTET_sum_counts_T = wide_1A_CTET_sum_counts %>%
+#   filter(Treatment == 'Transgenic')
+```
+
+## J1-19A
+
+```{r}
+# ## J1-19A
+# wide_19A_CTET = long19A %>% 
+#   summarise(`Average Sum Counts` = mean(sum_counts),
+#             `Average Percent of Total Counts` = mean(percent),
+#             .by = c(Chromosome,
+#                     Tissue,
+#                     Treatment,
+#                     Experiment)) %>% 
+#   pivot_wider(id_cols = everything(),
+#               names_from = Chromosome,
+#               values_from = c(`Average Sum Counts`, `Average Percent of Total Counts`)) %>% 
+#   arrange(Tissue)  %>% 
+#   mutate(across(starts_with('Average Percent'), ~ formatC(.x, 
+#                                                           digits = 3,
+#                                                           format = 'f')),
+#                 across(starts_with('Average sum'), ~ formatC(.x, 
+#                                                              big.mark = ',',
+#                                                              digits = 0,
+#                                                              format = 'f'))) %>% 
+#   select(colnames(wide_1A_CTET))
+# 
+# wide_19A_CTET_percents = wide_19A_CTET %>% 
+#   select(Tissue,
+#          Treatment,
+#          `Average Percent of Total Counts_J. regia`,
+#          `Average Percent of Total Counts_pDE00.0201`,
+#          `Average Percent of Total Counts_At`,
+#          `Average Percent of Total Counts_Ti`,
+#          `Average Percent of Total Counts_circular`,
+#          `Average Percent of Total Counts_linear`)
+# 
+# 
+# 
+# ## Percents Control
+# df_list$wide_19A_CTET_percents_C = wide_19A_CTET_percents %>% 
+#   filter(Treatment == 'Control')
+# ## Percents Transgenic
+# df_list$wide_19A_CTET_percents_T = wide_19A_CTET_percents %>% 
+#   filter(Treatment == 'Transgenic')
+# 
+# wide_19A_CTET_sum_counts = wide_19A_CTET %>% 
+#   select(Tissue,
+#          Treatment,
+#          `Average Sum Counts_J. regia`,
+#          `Average Sum Counts_pDE00.0201`,
+#          `Average Sum Counts_At`,
+#          `Average Sum Counts_Ti`,
+#          `Average Sum Counts_circular`,
+#          `Average Sum Counts_linear`)
+# ## Counts Control
+# df_list$wide_19A_CTET_sum_counts_C = wide_19A_CTET_sum_counts %>% 
+#   filter(Treatment == 'Control')
+# ## Counts Transgenic
+# df_list$wide_19A_CTET_sum_counts_T = wide_19A_CTET_sum_counts %>% 
+#   filter(Treatment == 'Transgenic')
+
+```
+
+# Summarise counts by chromosome, and experiment and not treatment into averages of sums and percentages of totals
+
+## J1-1A
+
+```{r}
+
+## J1-1A
+# wide_both = longboth %>% 
+#   summarise(`Average Sum Counts` = mean(sum_counts),
+#             `Average Percent of Total Counts` = mean(percent),
+#             .by = c(Chromosome,
+#                     Tissue,
+#                     Treatment)) %>% 
+#   pivot_wider(id_cols = everything(),
+#               names_from = Chromosome,
+#               values_from = c(`Average Sum Counts`, `Average Percent of Total Counts`)) %>% 
+#   arrange(Tissue) %>% 
+#   select(Tissue,
+#          Treatment,
+#          starts_with('Average Percent'),
+#          starts_with('Average Sum')) %>% 
+#   mutate(across(starts_with('Average Percent'), ~ formatC(.x, 
+#                                                           digits = 3,
+#                                                           format = 'f')),
+#                 across(starts_with('Average sum'), ~ formatC(.x, 
+#                                                              big.mark = ',',
+#                                                              digits = 0,
+#                                                              format = 'f')))
+```
+
+## J1-19A
+
+```{r}
+# wide_both_Control = wide_both %>% 
+#   filter(Treatment == "Control")
+#   
+#   
+# 
+# df_list$wide_both_percents_Control = wide_both_Control %>% 
+#   select(Tissue,
+#          `Average Percent of Total Counts_J. regia`,
+#          `Average Percent of Total Counts_pDE00.0201`,
+#          `Average Percent of Total Counts_At`,
+#          `Average Percent of Total Counts_Ti`,
+#          `Average Percent of Total Counts_circular`,
+#          `Average Percent of Total Counts_linear`)
+# 
+# df_list$wide_both_sum_counts_Control = wide_both_Control %>% 
+#   select(Tissue,
+#          `Average Sum Counts_J. regia`,
+#          `Average Sum Counts_pDE00.0201`,
+#          `Average Sum Counts_At`,
+#          `Average Sum Counts_Ti`,
+#          `Average Sum Counts_circular`,
+#          `Average Sum Counts_linear`)
+
+```
+
+```{r}
+# wide_both_Transgenic = wide_both %>% 
+#   filter(Treatment == "Transgenic")
+#   
+#   
+# 
+# df_list$wide_both_percents_Transgenic = wide_both_Transgenic %>% 
+#   select(Tissue,
+#          `Average Percent of Total Counts_J. regia`,
+#          `Average Percent of Total Counts_pDE00.0201`,
+#          `Average Percent of Total Counts_At`,
+#          `Average Percent of Total Counts_Ti`,
+#          `Average Percent of Total Counts_circular`,
+#          `Average Percent of Total Counts_linear`)
+# 
+# df_list$wide_both_sum_counts_Transgenic = wide_both_Transgenic %>% 
+#   select(Tissue,
+#          `Average Sum Counts_J. regia`,
+#          `Average Sum Counts_pDE00.0201`,
+#          `Average Sum Counts_At`,
+#          `Average Sum Counts_Ti`,
+#          `Average Sum Counts_circular`,
+#          `Average Sum Counts_linear`)
+```
+
+## Make excel workbook for these tables
+
+```{r}
+# # Create a new Excel workbook
+# wb <- createWorkbook()
+# 
+# # Define sheet names and corresponding data frames
+# sheet_names <- c("J1-1A Percents Control",
+#                  "J1-1A Percents Transgenic",
+#                  "J1-1A Counts Control", 
+#                  "J1-1A Counts Transgenic",
+#                  "J1-19A Percents Control", 
+#                  "J1-19A Percents Transgenic",
+#                  "J1-19A Counts Control",
+#                  "J1-19A Counts Transgenic",
+#                  "Both Percents Control",
+#                  "Both Counts Control",
+#                  "Both Percents Transgenic",
+#                  "Both Counts Transgenic")
+# 
+# # data_frames <- list(wide_1A_percents,
+# #                     wide_1A_sum_counts,
+# #                     wide_19A_percents,
+# #                     wide_19A_sum_counts)
+# 
+# # Add sheets to the workbook with specified names and write data frames to each sheet
+# for (i in seq_along(sheet_names)) {
+#   addWorksheet(wb, sheet_names[i])
+#   writeData(wb, sheet = i, df_list[[i]])
+# }
+# 
+# # Save the workbook to a file
+# saveWorkbook(wb,
+#              "RNAseq_Figures_HJS/J1_1A_19A_counts_and_percent_counts.xlsx",
+#              overwrite = T)
+```
+
+# J1-1A Plot iaam and ipt
+
+```{r, fig.width=8}
+## CPM transformed raw counts in DGE analysis script:
+## C:/Users/hsaxe/Box/ALAB/Transcriptome_data/Transgenic_crown_gall_rootstock/J1_1A/J1_1A_mapped_to_Jr2.0_C58_pDE00.0201_resequenced.qmd
+cpmdds_1A = fread('J1_1A/Plotting/cpm_plotting_data.csv')
+
+raw_counts = fread('J1_1A/Plotting/raw_counts.csv')
+
+annotation_1A = fread('J1_1A/Plotting/annotation.csv')
+
+## TPM transform raw counts
+TPM = raw_counts %>% 
+  left_join(annotation_1A %>% 
+              select(GeneID, exonic_length) %>% 
+              distinct())%>% 
+  drop_na() %>% 
+  mutate(across(!GeneID, ~ (.x/(exonic_length/1000))/(sum(.x/(exonic_length/1000))/1000000))) %>% 
+  select(!exonic_length)
+
+# Test for TPM transformation. Each sample should have a sum of 1,000,000
+TPM %>% 
+  summarise(across(!GeneID, ~ sum(.x)))
+
+
+metadata_1A = fread('J1_1A/Plotting/metadata.csv') %>% 
+  mutate(Treatment = case_when(grepl('1A', Sample) ~ 'J1-1A Rootstock',
+                               grepl('C', Sample) ~ 'J1-Wild Type Rootstock',
+                               T ~ NA),
+         Tissue = str_extract(Sample, 'R|S|U') %>% 
+           factor(., levels = c('R', 'U', 'S')),
+         Treatment_Tissue = paste(Treatment, Tissue, sep = '_') %>% 
+           factor(., levels = c('J1.1A_R', 'J1.1A_U', 'J1.1A_S',
+                                'J1.C_R', 'J1.C_U', 'J1.C_S')))
+
+```
+
+# Initial CPM plotting
+
+```{r}
+plotdat = cpmdds_1A %>% 
+  data.frame() %>% 
+  # rownames_to_column("GeneID") %>%
+  pivot_longer(!GeneID, 
+               names_to = 'Sample',
+               values_to = 'Expression') %>% 
+  filter(GeneID %like% 'ATU_RS23060|ATU_RS23055') %>% 
+  mutate(Sample = gsub('\\.', '-', Sample)) %>% 
+  left_join(metadata_1A %>% 
+              mutate(Sample = gsub('\\.', '-', Sample))) %>% 
+  left_join(annotation_1A)
+
+ggplot(plotdat,
+       aes(Treatment, Expression,
+           fill = Tissue))+
+  geom_boxplot()+
+  scale_fill_viridis_d(begin = 0.5, end = 1)+
+  theme_prism()+
+  facet_wrap(~GeneID,
+             scales = 'free')
+
+```
+
+## Triggers
+
+```{r}
+Triggers_1A = cpmdds_1A %>% 
+  data.frame() %>% 
+  pivot_longer(!GeneID, 
+               names_to = 'Sample',
+               values_to = 'CPM') %>% 
+  filter(GeneID %like% 'iaa M|ipt|linker') %>% 
+  mutate(Sample = gsub('\\.', '-', Sample)) %>% 
+  left_join(metadata_1A %>% 
+              mutate(Sample = gsub('\\.', '-', Sample))) %>% 
+  left_join(annotation_1A) %>% 
+  mutate(Event = 'J1-1A Rootstock')
+```
+
+```{r, fig.width=8, fig.height=15}
+p = ggplot(Triggers_1A,
+       aes(Tissue, CPM))+
+  geom_boxplot()+
+  scale_fill_viridis_d(begin = 0.5, end = 1)+
+  theme_prism()+
+  ggtitle('Triggers')+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_y_continuous(labels = scales::label_comma())+
+  facet_grid(GeneID~Treatment,
+             scales = 'free',
+             axes = 'all',
+             axis.labels = 'all_x')
+
+p
+
+save_plot('RNAseq_Figures_HJS/Triggers_1A.png',
+          p,
+          width = 20,
+          height = 18)
+```
+
+# TPM plotting
+
+Notice the relative difference in CPM vs TPM values for iaaM and ipt. With CPM, one my infer iaaM has higher expression,
+but when TPM normalized, they have similar expression.
+
+## IaaM1A
+
+```{r}
+J1A = list()
+
+J1A$Iaam = TPM %>% 
+  data.frame() %>% 
+  pivot_longer(!GeneID, 
+               names_to = 'Sample',
+               values_to = 'TPM') %>% 
+  filter(GeneID %like% 'iaaM') %>% 
+  mutate(Sample = gsub('\\.', '-', Sample)) %>% 
+  left_join(metadata_1A %>% 
+              mutate(Sample = gsub('\\.', '-', Sample))) %>%
+  left_join(annotation_1A) %>% 
+  mutate(Event = 'J1-1A Rootstock',
+         GeneID = case_when(GeneID == "iaaM-antisense" ~ 'Antisense <i>iaa</i>M dsRNA',
+                            GeneID == "iaaM-sense" ~ '<i>iaa</i>M mRNA',
+                            GeneID == "iaaM-sense-self-complimentary" ~ 'Sense <i>iaa</i>M dsRNA',
+                            T~NA) %>% 
+           factor(levels = c('Antisense <i>iaa</i>M dsRNA',
+                             '<i>iaa</i>M mRNA',
+                             'Sense <i>iaa</i>M dsRNA')),
+         Treatment = gsub(" Rootstock", "<br>Rootstock", Treatment) %>% 
+           factor(levels = c('J1-1A<br>Rootstock',
+                             'J1-Wild Type<br>Rootstock')))
+```
+
+```{r, fig.width=8}
+# Plot with faceting and custom labels
+J1A$Iaam_plot = ggplot(J1A$Iaam, aes(Tissue, TPM)) +
+  geom_boxplot() +
+  theme_prism() +
+  ggtitle('Small RNA corresponding<br>to the <i>iaa</i>M trigger dsRNA transgene') +
+  theme(
+    plot.title = element_markdown(hjust = 0.5),
+    strip.text.y.right = element_text(angle = 0),
+    strip.text = element_markdown(size = 12)  # Use element_markdown to enable HTML
+  ) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  facet_wrap(Treatment ~ GeneID,
+             scales = 'free',
+             axes = 'all',
+             axis.labels = 'all'
+             )
+
+J1A$Iaam_plot
+
+save_plot('Final_Figs_1A/iaam_1A.png',
+          J1A$Iaam_plot,
+          width = 22,
+          height = 14)
+
+```
+
+## Table
+
+```{r}
+J1A$Iaam_table = TPM %>% 
+  data.frame() %>% 
+  pivot_longer(!GeneID, 
+               names_to = 'Sample',
+               values_to = 'TPM') %>% 
+  filter(GeneID %like% 'iaaM') %>% 
+  mutate(Sample = gsub('\\.', '-', Sample)) %>% 
+  left_join(metadata_1A %>% 
+              mutate(Sample = gsub('\\.', '-', Sample))) %>%
+  left_join(annotation_1A) %>% 
+  mutate(Event = 'J1-1A Rootstock',
+         GeneID = case_when(GeneID == "iaaM-antisense" ~ 'Antisense <i>iaa</i>M dsRNA',
+                            GeneID == "iaaM-sense" ~ '<i>iaa</i>M mRNA',
+                            GeneID == "iaaM-sense-self-complimentary" ~ 'Sense <i>iaa</i>M dsRNA',
+                            T~NA) %>% 
+           factor(levels = c('Antisense <i>iaa</i>M dsRNA',
+                             '<i>iaa</i>M mRNA',
+                             'Sense <i>iaa</i>M dsRNA')),
+         Treatment = factor(Treatment, levels = c('J1-1A Rootstock',
+                             'J1-Wild Type Rootstock'))) %>% 
+  summarize(`Mean TPM` = mean(TPM),
+            .by = c(GeneID,
+                    Treatment,
+                    Tissue)) %>% 
+  arrange(Treatment, Tissue) %>% 
+  pivot_wider(names_from = GeneID,
+              values_from = `Mean TPM`)
+
+J1A$Iaam_kable = kable(J1A$Iaam_table, 
+      format = 'html',
+      escape = F,
+      digits = 2) %>% 
+  kable_styling(bootstrap_options = c("striped", 
+                                      "hover", 
+                                      "condensed", 
+                                      "responsive")) %>%
+  row_spec(0, bold = TRUE, italic = F) 
+
+J1A$Iaam_kable 
+
+save_kable(J1A$Iaam_kable, 'RNAseq_Figures_HJS/J1A_iaaM_table.html')
+
+# Convert the HTML file to an image
+webshot2::webshot(url = "RNAseq_Figures_HJS/J1A_iaaM_table.html", 
+        file = "Final_Figs_1A/J1A_iaaM_table.png",
+        # vheight = 300,
+        cliprect = c(0, 5, 1000, 230))
+```
+
+## Ipt 1A
+
+```{r}
+J1A$Ipt = TPM %>% 
+  data.frame() %>% 
+  pivot_longer(!GeneID, 
+               names_to = 'Sample',
+               values_to = 'TPM') %>% 
+  filter(GeneID %like% 'ipt|linker') %>% 
+  mutate(Sample = gsub('\\.', '-', Sample)) %>% 
+  left_join(metadata_1A %>% 
+              mutate(Sample = gsub('\\.', '-', Sample))) %>%
+  left_join(annotation_1A) %>% 
+  mutate(Event = 'J1-1A Rootstock',
+         GeneID = case_when(GeneID == "ipt-sense" ~ 'Sense <i>ipt</i> dsRNA',
+                            GeneID == "linker" ~ '<i>E. coli</i> DNA',
+                            GeneID == "ipt-antisense" ~ 'Antisense <i>ipt</i> dsRNA',
+                            T~NA) %>% 
+           factor(levels = c('Sense <i>ipt</i> dsRNA',
+                             '<i>E. coli</i> DNA',
+                             'Antisense <i>ipt</i> dsRNA')),
+         Treatment = gsub(" Rootstock", "<br>Rootstock", Treatment) %>% 
+           factor(levels = c('J1-1A<br>Rootstock',
+                             'J1-Wild Type<br>Rootstock')))
+```
+
+```{r, fig.width=8}
+# Plot with faceting and custom labels
+J1A$Ipt_plot = ggplot(J1A$Ipt, aes(Tissue, TPM)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(begin = 0.5, end = 1) +
+  theme_prism() +
+  labs(title = 'Small RNA corresponding<br>to the <i>ipt</i> trigger dsRNA transgene') +
+  theme(
+    plot.title = element_markdown(hjust = 0.5),
+    strip.text.y.right = element_text(angle = 0),
+    strip.text = element_markdown(size = 12)  # Use element_markdown to enable HTML
+  ) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  facet_wrap(Treatment ~ GeneID,
+             scales = 'free',
+             axes = 'all',
+             axis.labels = 'all_x')
+
+J1A$Ipt_plot
+
+save_plot('Final_Figs_1A/ipt_1A.png',
+          J1A$Ipt_plot,
+          width = 22,
+          height = 14)
+```
+
+## Table
+
+```{r}
+J1A$Ipt_table = TPM %>% 
+  data.frame() %>% 
+  pivot_longer(!GeneID, 
+               names_to = 'Sample',
+               values_to = 'TPM') %>% 
+  filter(GeneID %like% 'ipt|linker') %>% 
+  mutate(Sample = gsub('\\.', '-', Sample)) %>% 
+  left_join(metadata_1A %>% 
+              mutate(Sample = gsub('\\.', '-', Sample))) %>%
+  left_join(annotation_1A) %>% 
+  mutate(Event = 'J1-1A Rootstock',
+         GeneID = case_when(GeneID == "ipt-sense" ~ 'Sense <i>ipt</i> dsRNA',
+                            GeneID == "linker" ~ '<i>E. coli</i> DNA',
+                            GeneID == "ipt-antisense" ~ 'Antisense <i>ipt</i> dsRNA',
+                            T~NA) %>% 
+           factor(levels = c('Sense <i>ipt</i> dsRNA',
+                             '<i>E. coli</i> DNA',
+                             'Antisense <i>ipt</i> dsRNA')),
+         Treatment = factor(Treatment, 
+                            levels = c('J1-1A Rootstock',
+                             'J1-Wild Type Rootstock'))) %>% 
+  summarize(`Mean TPM` = mean(TPM),
+            .by = c(GeneID,
+                    Treatment,
+                    Tissue)) %>% 
+  arrange(Treatment, Tissue) %>% 
+  pivot_wider(names_from = GeneID,
+              values_from = `Mean TPM`)
+
+J1A$Ipt_kable = kable(J1A$Ipt_table, 
+      format = 'html',
+      escape = F,
+      digits = 2) %>% 
+  kable_styling(bootstrap_options = c("striped", 
+                                      "hover", 
+                                      "condensed", 
+                                      "responsive")) %>%
+  row_spec(0, bold = TRUE, italic = F) 
+
+J1A$Ipt_kable 
+
+save_kable(J1A$Ipt_kable, 'RNAseq_Figures_HJS/J1A_ipt_table.html')
+
+# Convert the HTML file to an image
+webshot2::webshot(url = "RNAseq_Figures_HJS/J1A_ipt_table.html", 
+        file = "Final_Figs_1A/J1A_ipt_table.png",
+        # vheight = 300,
+        cliprect = c(0, 5, 1000, 230))
+```
+
+## Selection 1A
+
+```{r}
+selection_1A = TPM %>% 
+  data.frame() %>% 
+  pivot_longer(!GeneID, 
+               names_to = 'Sample',
+               values_to = 'TPM') %>% 
+  filter(GeneID %like% 'GUS|npt') %>% 
+  mutate(Sample = gsub('\\.', '-', Sample)) %>% 
+  left_join(metadata_1A %>% 
+              mutate(Sample = gsub('\\.', '-', Sample))) %>%
+  left_join(annotation_1A) 
+
+  # mutate(Event = 'J1-1A Rootstock',
+  #        GeneID = case_when(GeneID == "ipt sense" ~ 'Sense <i>ipt</i> dsRNA',
+  #                           GeneID == "linker" ~ '<i>E. coli</i> DNA',
+  #                           GeneID == "ipt antisense" ~ 'Antisense <i>ipt</i> dsRNA',
+  #                           T~NA) %>% 
+  #          factor(levels = c('Sense <i>ipt</i> dsRNA',
+  #                            '<i>E. coli</i> DNA',
+  #                            'Antisense <i>ipt</i> dsRNA')),
+  #        Treatment = gsub(" Rootstock", "<br>Rootstock", Treatment) %>% 
+  #          factor(levels = c('J1-1A<br>Rootstock',
+  #                            'J1-Wild Type<br>Rootstock')))
+```
+
+```{r, fig.width=8}
+# Plot with faceting and custom labels
+p <- ggplot(selection_1A, aes(Tissue, TPM)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(begin = 0.5, end = 1) +
+  theme_prism() +
+  # labs(title = 'Small RNA corresponding<br>to the <i>ipt</i> trigger dsRNA transgene') +
+  theme(
+    plot.title = element_markdown(hjust = 0.5),
+    strip.text.y.right = element_text(angle = 0),
+    strip.text = element_markdown(size = 12)  # Use element_markdown to enable HTML
+  ) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  facet_grid(GeneID ~ Treatment,
+             scales = 'free',
+             axes = 'all',
+             axis.labels = 'all_x')
+
+print(p)
+
+save_plot('Final_Figs_1A/selection_1A.png',
+          p,
+          width = 22,
+          height = 14)
+```
+
+## Selection
+
+```{r}
+Selection_1A = cpmdds_1A %>% 
+  data.frame() %>% 
+  pivot_longer(!GeneID, 
+               names_to = 'Sample',
+               values_to = 'CPM') %>% 
+  filter(GeneID %like% 'GUS|npt') %>% 
+  mutate(Sample = gsub('\\.', '-', Sample)) %>% 
+  left_join(metadata_1A %>% 
+              mutate(Sample = gsub('\\.', '-', Sample))) %>% 
+  left_join(annotation_1A) %>% 
+  mutate(Event = 'J1-1A Rootstock')
+```
+
+```{r, fig.width=8}
+p = ggplot(Selection_1A,
+       aes(Tissue, CPM))+
+  geom_boxplot()+
+  scale_fill_viridis_d(begin = 0.5, end = 1)+
+  theme_prism()+
+  ggtitle('Selectable Markers')+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_y_continuous(labels = scales::label_comma())+
+  facet_grid(GeneID~Treatment,
+             scales = 'free',
+             axes = 'all',
+             axis.labels = 'all_x')
+
+p
+
+save_plot('RNAseq_Figures_HJS/Selection_1A.png',
+          p,
+          width = 20,
+          height = 14)
+```
+
+# J1-19A Plot iaam and ipt
+
+```{r, fig.width=8}
+cpmdds_19A = fread('J1_19A/Plotting/cpm_plotting_data.csv')
+
+annotation_19A = fread('J1_19A/Plotting/annotation.csv')
+
+metadata_19A = fread('J1_19A/Plotting/metadata.csv') %>% 
+  mutate(Treatment = case_when(grepl('19A', Sample) ~ 'J1-19A',
+                               grepl('C', Sample) ~ 'J1-Wild Type Rootstock',
+                               T ~ NA),
+         Tissue = str_extract(Sample, 'R|S|U|K|P') %>% 
+           factor(., levels = c('R', 'U', 'S', 'P', 'K')),
+         Treatment_Tissue = gsub('.$', '', Sample) %>% 
+           factor(., levels = c('J1.19A_R', 'J1.19A_U', 'J1.19A_S', 'J1.19A_K', 'J1.19A_P',
+                                'J1.C_R', 'J1.C_U', 'J1.C_S', 'J1.C_K')))
+
+
+```
+
+## Triggers
+
+```{r}
+Triggers_19A = cpmdds_19A %>% 
+  data.frame() %>% 
+  pivot_longer(!GeneID, 
+               names_to = 'Sample',
+               values_to = 'CPM') %>% 
+  filter(GeneID %like% 'iaa_M|ipt') %>% 
+  mutate(Sample = gsub('\\.', '-', Sample)) %>% 
+  left_join(metadata_19A %>% 
+              mutate(Sample = gsub('\\.', '-', Sample))) %>% 
+  left_join(annotation_19A) %>% 
+  mutate(Event = 'J1-19A')
+```
+
+```{r, fig.width=10, fig.height=7}
+p = ggplot(Triggers_19A,
+       aes(Tissue, CPM))+
+  geom_boxplot()+
+  scale_fill_viridis_d(begin = 0.5, end = 1)+
+  theme_prism()+
+  ggtitle('Triggers')+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_y_continuous(labels = scales::label_comma())+
+  facet_grid(GeneID~Treatment,
+             scales = 'free',
+             axes = 'all',
+             axis.labels = 'all_x')
+
+
+p
+
+save_plot('RNAseq_Figures_HJS/Triggers_19A.png',
+          p,
+          width = 25,
+          height = 18)
+```
+
+## Selection
+
+```{r}
+Selection_19A = cpmdds_19A %>% 
+  data.frame() %>% 
+  pivot_longer(!GeneID, 
+               names_to = 'Sample',
+               values_to = 'CPM') %>% 
+  filter(GeneID %like% 'GUS|npt') %>% 
+  mutate(Sample = gsub('\\.', '-', Sample)) %>% 
+  left_join(metadata_19A %>% 
+              mutate(Sample = gsub('\\.', '-', Sample))) %>% 
+  left_join(annotation_19A) %>% 
+  mutate(Event = 'J1-19A')
+```
+
+```{r, fig.width=8}
+p = ggplot(Selection_19A,
+       aes(Tissue, CPM))+
+  geom_boxplot()+
+  scale_fill_viridis_d(begin = 0.5, end = 1)+
+  theme_prism()+
+  ggtitle('Selectable Markers')+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_y_continuous(labels = scales::label_comma())+
+  facet_grid(GeneID~Treatment,
+             scales = 'free',
+             axes = 'all',
+             axis.labels = 'all_x')
+p
+
+save_plot('RNAseq_Figures_HJS/Selection_19A.png',
+          p,
+          width = 25,
+          height = 14)
+```
