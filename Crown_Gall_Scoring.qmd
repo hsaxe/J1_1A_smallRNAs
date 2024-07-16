@@ -1,0 +1,637 @@
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load neccessary libraries
+```{r echo=TRUE}
+pacman::p_load(tidytable,
+               data.table,
+               dplyr,
+               ggpubr,
+               tidyr,
+               ggplot2,
+               ggprism,
+               sjPlot,
+               tibble,
+               tidytext,
+               stringr,
+               scales,
+               openxlsx,
+               forcats)
+```
+
+
+```{r}
+dat = fread('Crown Gall Scoring July 24 2019.csv',
+            skip = 1) %>% 
+  column_to_rownames(var = 'V1') %>% 
+  t() %>% 
+  data.frame() %>% 
+  rownames_to_column(var = 'Observation') %>% 
+  mutate(Observation = 1:nrow(.)) %>% 
+  pivot_longer(!Observation,
+               names_to = 'Tree',
+               values_to = 'Score') %>% 
+  mutate(Tree = gsub('\\.', '-', Tree) %>% 
+           gsub('a(?=-)', '', ., perl = T),
+         Background = str_match(Tree, '(.*)-')[,2],
+         Background = case_when(is.na(Background) ~ Tree,
+                                T ~ Background),
+         Event = str_match(Tree, '-(.*)')[,2],
+         Event = case_when(is.na(Event) ~ Tree,
+                           T ~ Event),
+         Treatment = case_when(grepl('\\d+([[:alpha:]]+)', Event) ~ paste0(Background, '-Transgenic'),
+                               grepl('Control', Tree) ~ Tree,
+                               T ~ Event)
+  )
+
+reps = dat %>% 
+  filter(!is.na(Score)) %>% 
+  count(Treatment)
+
+dat_mean = dat %>%
+  summarise(`Average Score` = mean(Score,
+                                   na.rm = T),
+            .by = c(Background,
+                    Treatment),
+            reps = sum(!is.na(Score)))
+```
+
+
+```{r}
+dat %>% count(Score)
+```
+
+
+# Plot all backgrounds/Events
+```{r, fig.width=10}
+ggplot(dat_mean, 
+       aes(reorder(Treatment, `Average Score`), `Average Score`))+
+  geom_bar(stat = 'identity')+
+  theme_prism()+
+  theme(axis.text.x = element_text(angle = 30),
+        plot.margin = margin(10,
+                             10,
+                             10,
+                             10,
+                             unit = 'mm'))+
+  ylim(c(0,4))+
+  geom_text(aes(label = reps,
+                fontface = 'bold'),
+            vjust = -1)
+```
+
+# Plot those of interest
+```{r, fig.width=10}
+dat_of_interest_mean = dat_mean %>% 
+         filter(!Background %like% 'AZ025|CR1|CR3|RX1|Px|Vlach|VX211|WIP3') %>% 
+  mutate(Treatment = factor(Treatment,
+                            levels = c("J1-Control",
+                                       "J1-Transgenic",
+                                       "J21-Control",
+                                       "J21-Transgenic",
+                                       "RR4-Control",
+                                       "RR4-Transgenic")))
+
+ggplot(dat_of_interest_mean, 
+       aes(reorder(Treatment, `Average Score`), `Average Score`))+
+  geom_bar(stat = 'identity')+
+  theme_prism()+
+  theme(axis.text.x = element_text(angle = 30),
+        plot.margin = margin(10,
+                             10,
+                             10,
+                             10,
+                             unit = 'mm'))+
+  ylim(c(0,4))+
+  labs(x = NULL)+
+  geom_text(aes(label = reps,
+                fontface = 'bold'),
+            vjust = -1)
+```
+
+```{r}
+dat_of_interest_mean2 = dat %>% 
+         filter(!Background %like% 'AZ025|CR1|CR3|RX1|Px|Vlach|VX211|WIP3') %>% 
+  mutate(Treatment = factor(Treatment,
+                            levels = c("J1-Control",
+                                       "J1-Transgenic",
+                                       "J21-Control",
+                                       "J21-Transgenic",
+                                       "RR4-Control",
+                                       "RR4-Transgenic")),
+         Tree = factor(Tree,
+                       levels = unique(Tree))) %>% 
+  group_by(Tree) %>% 
+  mutate(reps = sum(!is.na(Score))) %>% 
+  ungroup() %>% 
+  summarise(`Average Score` = mean(Score,
+                                   na.rm = T),
+            .by = c(Tree, 
+                    Treatment,
+                    reps,
+                    Background))
+
+background_mean = dat %>% 
+  filter(!Background %like% 'AZ025|CR1|CR3|RX1|Px|Vlach|VX211|WIP3') %>% 
+  summarise(background_mean = mean(Score, 
+                                   na.rm = T),
+            .by = Background)
+
+
+```
+
+# Separate plots by background
+
+### Facet
+```{r, fig.height=10, fig.width=10}
+F1 = ggplot(dat_of_interest_mean2, 
+       aes(reorder(Tree, `Average Score`), `Average Score`))+
+  geom_bar(stat = 'identity',
+           color = 'black',
+           size = 1)+
+  theme_prism()+
+  theme(axis.text.x = element_text(angle = 90),
+        plot.margin = margin(10,
+                             10,
+                             10,
+                             10,
+                             unit = 'mm'))+
+  ylim(c(0,4))+
+  labs(x = NULL)+
+  geom_text(aes(label = reps,
+                fontface = 'bold'),
+            vjust = -1)+
+  geom_hline(data = background_mean,
+             aes(yintercept = background_mean),
+             size = 1,
+             linetype = 'dashed')+
+  facet_wrap(~Background,
+             scales = 'free_x',
+             ncol = 1)
+
+F1
+```
+# Modeling effects of Transgene on Crown Gall score
+
+
+```{r}
+dat_of_interest = dat %>% 
+         filter(!Background %like% 'AZ025|CR1|CR3|RX1|Px|Vlach|VX211|WIP3') %>% 
+  mutate(Treatment = factor(Treatment,
+                            levels = c("J1-Control",
+                                       "J1-Transgenic",
+                                       "J21-Control",
+                                       "J21-Transgenic",
+                                       "RR4-Control",
+                                       "RR4-Transgenic")),
+         Tree = factor(Tree,
+                       levels = unique(Tree)),
+         Binary_Score = case_when(Score > 0 ~ 1,
+                                  Score == 0 ~ 0,
+                                  T ~ NA),
+         Binary_Score2 = case_when(Score >= 2 ~ 1,
+                                  Score < 2 ~ 0,
+                                  T ~ NA),
+         Percent_Score = case_when(Score == 0 ~ 0,
+                                   Score == 1 ~ 20,
+                                   Score == 2 ~ 40, 
+                                   Score == 3 ~ 60,
+                                   Score == 4 ~ 80, 
+                                   Score == 5 ~ 100,
+                                   T ~ NA)) %>% 
+  group_by(Tree) %>% 
+  mutate(reps = sum(!is.na(Score))) %>% 
+  ungroup()
+```
+
+# Calculate probabilities. Given the conversion of the 1-5 score to binary 0 and 1 outcomes, the average is the probability
+```{r}
+Prob_infections = dat_of_interest %>% 
+  summarise(`Probability Score > 0` = mean(Binary_Score,
+                                     na.rm = T),
+            `Probability Score >= 2` = mean(Binary_Score2,
+                                     na.rm = T),
+            reps = sum(!is.na(Score)),
+            .by = c(Treatment,
+                    Background)) %>% 
+  pivot_longer(!c(Treatment,
+                  Background,
+                  reps),
+               names_to = 'Infection Severity',
+               values_to = 'Probability') %>% 
+  mutate(Formatted_Probability = percent(Probability, accuracy = 0.1),
+         Stars = case_when(Background == 'J1' ~ '**',
+                           T ~ ''))
+```
+
+```{r, fig.height=10, fig.width=8}
+ggplot(Prob_infections %>% 
+         drop_na(), 
+       aes(reorder(Treatment, Probability), Probability))+
+  geom_bar(stat = 'identity')+
+  theme_prism()+
+  theme(axis.text.x = element_text(angle = 40),
+        plot.margin = margin(10,
+                             10,
+                             10,
+                             10,
+                             unit = 'mm'))+
+  ylim(c(0,1))+
+  labs(x = NULL)+
+  geom_text(aes(label = Formatted_Probability,
+                fontface = 'bold'),
+            vjust = -1)+
+  facet_wrap(Background~`Infection Severity`+Stars,
+             scales = 'free_x',
+             ncol = 2)
+```
+
+
+
+```{r}
+ggplot(dat_of_interest,
+       aes(Binary_Score))+
+  geom_bar()
+```
+```{r}
+plot(dat_of_interest %>% 
+       filter(Background == 'J1') %>% 
+       drop_na() %>% 
+       pull(Tree),
+     dat_of_interest %>% 
+       filter(Background == 'J1') %>%
+       drop_na() %>% 
+       pull(Binary_Score))
+```
+
+
+
+## Linear modeling
+```{r}
+J1_trees = dat_of_interest %>% 
+  filter(Treatment %like% 'J1') %>% 
+  mutate(Tree = factor(Tree,
+                       levels = unique(Tree)))
+  
+
+lm_Transgene_J1 = lm(Percent_Score ~ Tree, 
+                  data = J1_trees)
+
+J1_trees_sum = summary(lm_Transgene_J1)
+
+J1_trees_sum
+```
+
+
+```{r}
+J1_trees_coefs = J1_trees_sum[["coefficients"]] %>% 
+  as.data.frame() %>% 
+  rename('P. value' = 'Pr(>|t|)') %>% 
+  rownames_to_column(var = 'Tree') %>% 
+  filter(Tree != '(Intercept)') %>% 
+  mutate(Stars = case_when(between(`P. value`, 0, 0.001) ~ '***',
+                           between(`P. value`, 0.001, 0.01) ~ '**',
+                           between(`P. value`, 0.01, 0.05) ~ '*',
+                           T ~ ''))
+```
+
+```{r}
+J21_trees = dat_of_interest %>% 
+  filter(Treatment %like% 'J21') %>% 
+  mutate(Tree = factor(Tree,
+                       levels = unique(Tree)))
+  
+
+lm_Transgene_J21 = lm(Percent_Score ~ Tree, 
+                  data = J21_trees)
+
+J21_trees_sum = summary(lm_Transgene_J21)
+
+J21_trees_sum
+```
+
+
+```{r}
+J21_trees_coefs = J21_trees_sum[["coefficients"]] %>% 
+  as.data.frame() %>% 
+  rename('P. value' = 'Pr(>|t|)') %>% 
+  rownames_to_column(var = 'Tree') %>% 
+  filter(Tree != '(Intercept)') %>% 
+  mutate(Stars = case_when(between(`P. value`, 0, 0.001) ~ '***',
+                           between(`P. value`, 0.001, 0.01) ~ '**',
+                           between(`P. value`, 0.01, 0.05) ~ '*',
+                           T ~ ''))
+```
+
+```{r}
+RR4_trees = dat_of_interest %>% 
+  filter(Treatment %like% 'RR4')  %>% 
+  mutate(Tree = factor(Tree,
+                       levels = unique(Tree)))
+  
+
+lm_Transgene_RR4 = lm(Percent_Score ~ Tree, 
+                  data = RR4_trees)
+
+RR4_trees_sum = summary(lm_Transgene_RR4)
+
+RR4_trees_sum
+```
+
+
+```{r}
+RR4_trees_coefs = RR4_trees_sum[["coefficients"]] %>% 
+  as.data.frame() %>% 
+  rename('P. value' = 'Pr(>|t|)') %>% 
+  rownames_to_column(var = 'Tree') %>% 
+  filter(Tree != '(Intercept)') %>% 
+  mutate(Stars = case_when(between(`P. value`, 0, 0.001) ~ '***',
+                           between(`P. value`, 0.001, 0.01) ~ '**',
+                           between(`P. value`, 0.01, 0.05) ~ '*',
+                           T ~ ''))
+```
+
+```{r}
+all_coefs = J1_trees_coefs %>% 
+  rbind(J21_trees_coefs) %>% 
+  rbind(RR4_trees_coefs) %>% 
+  mutate(Tree = gsub('Tree', '', Tree)) %>% 
+  left_join(dat_of_interest_mean2 %>% 
+              select(Tree,
+                     `Average Score`,
+                     Percent_Score,
+                     Background)) %>% 
+  rename('Score' = 'Average Score')
+```
+
+
+### Facet2 Boxplot
+```{r, fig.height=10, fig.width=10, dpi=600}
+boxplot_dat = dat_of_interest %>% filter(!Background %like% 'AZ025|CR1|CR3|RX1|Px|Vlach|VX211|WIP3')
+
+F2 = ggplot(boxplot_dat, 
+       aes(fct_reorder(Tree,
+                          Score,
+                          .fun = mean), Score))+
+  geom_boxplot()+
+  geom_point(aes(color = Background),
+             position = position_jitterdodge(jitter.width = 0.8,
+                                             dodge.width = 0.4)) +
+  theme_prism()+
+  theme(axis.text.x = element_text(angle = 90),
+        legend.position = 'none',
+        plot.margin = margin(10,
+                             10,
+                             10,
+                             10,
+                             unit = 'mm'))+
+  ylim(c(0,5))+
+  labs(x = NULL)+
+  scale_color_manual(values = c('J1' = 'black',
+                                'J21' = 'black',
+                                'RR4' = 'black')) +
+  scale_x_reordered()+
+  geom_text(data = all_coefs,
+            aes(label = Stars,
+                fontface = 'bold'),
+            vjust = -1,
+            size = 6)+
+  facet_wrap(~Background,
+             scales = 'free',
+             ncol = 1)
+
+F2
+```
+
+```{r, fig.height=10, fig.width=10, dpi=600}
+boxplot_dat = dat_of_interest %>% filter(!Background %like% 'AZ025|CR1|CR3|RX1|Px|Vlach|VX211|WIP3')
+
+F2 = ggplot(boxplot_dat, 
+       aes(fct_reorder(Tree,
+                          Percent_Score,
+                          .fun = mean), Percent_Score))+
+  geom_boxplot()+
+  geom_point(aes(color = Background),
+             position = position_jitterdodge(jitter.width = 0.8,
+                                             dodge.width = 0.4)) +
+  theme_prism()+
+  theme(axis.text.x = element_text(angle = 90),
+        legend.position = 'none',
+        plot.margin = margin(10,
+                             10,
+                             10,
+                             10,
+                             unit = 'mm'))+
+  ylim(c(0,5))+
+  labs(x = NULL)+
+  scale_color_manual(values = c('J1' = 'black',
+                                'J21' = 'black',
+                                'RR4' = 'black')) +
+  scale_x_reordered()+
+  geom_text(data = all_coefs,
+            aes(label = Stars,
+                fontface = 'bold'),
+            vjust = -1,
+            size = 6)+
+  facet_wrap(~Background,
+             scales = 'free',
+             ncol = 1)
+
+F2
+```
+
+
+### J1 Boxplot
+```{r, fig.width=8, fig.height=8}
+
+
+J1B = ggplot(dat %>% filter(Background %like% 'J1'), 
+       aes(fct_reorder(Tree, 
+                       Score,
+                       .fun = mean), Score))+
+  geom_boxplot()+
+  geom_point(aes(color = Background),
+             position = position_jitterdodge(jitter.width = 0.9,
+                                             dodge.width = 0.9)) + 
+  theme_prism()+
+  theme(axis.text.x = element_text(angle = 90),
+        legend.position = 'none',
+        plot.margin = margin(10,
+                             10,
+                             10,
+                             10,
+                             unit = 'mm'))+
+  ylim(c(0,6))+
+  labs(x = NULL)+
+  scale_color_manual(values = c('J1' = 'black')) +
+  # geom_text(aes(label = reps,
+  #               fontface = 'bold'),
+  #           vjust = -1)+
+  facet_wrap(~Background,
+             scales = 'free_x',
+             ncol = 1)
+
+J1B
+```
+
+### J1
+```{r}
+J1 = ggplot(dat_of_interest_mean2 %>% 
+         filter(Background == 'J1'), 
+       aes(reorder(Tree, `Average Score`), `Average Score`))+
+  geom_bar(stat = 'identity')+
+  theme_prism()+
+  theme(axis.text.x = element_text(angle = 40),
+        plot.margin = margin(10,
+                             10,
+                             10,
+                             10,
+                             unit = 'mm'))+
+  ylim(c(0,4))+
+  labs(x = NULL)+
+  geom_text(aes(label = reps,
+                fontface = 'bold'),
+            vjust = -1)
+
+J1
+```
+### J21
+```{r}
+J21 = ggplot(dat_of_interest_mean2 %>% 
+         filter(Background == 'J21'), 
+       aes(reorder(Tree, `Average Score`), `Average Score`))+
+  geom_bar(stat = 'identity')+
+  theme_prism()+
+  theme(axis.text.x = element_text(angle = 40),
+        plot.margin = margin(10,
+                             10,
+                             10,
+                             10,
+                             unit = 'mm'))+
+  ylim(c(0,4))+
+  labs(x = NULL)+
+  geom_text(aes(label = reps,
+                fontface = 'bold'),
+            vjust = -1)
+
+J21
+```
+### RR4
+```{r}
+RR4 = ggplot(dat_of_interest_mean2 %>% 
+         filter(Background == 'RR4') %>% 
+         drop_na(), 
+       aes(reorder(Tree, `Average Score`), `Average Score`))+
+  geom_bar(stat = 'identity')+
+  theme_prism()+
+  theme(axis.text.x = element_text(angle = 40),
+        plot.margin = margin(10,
+                             10,
+                             10,
+                             10,
+                             unit = 'mm'))+
+  ylim(c(0,4))+
+  labs(x = NULL)+
+  geom_text(aes(label = reps,
+                fontface = 'bold'),
+            vjust = -1)
+
+RR4
+```
+
+
+
+
+
+
+```{r}
+dat2 = fread('Crown Gall Scoring July 24 2019.csv',
+            skip = 1) %>% 
+  column_to_rownames(var = 'V1') %>% 
+  t() %>% 
+  as.data.frame()
+
+t.test(dat2$`J1a Control`, dat2$`J1a-1A`)
+```
+## Generalized linear modeling
+```{r}
+glm_Transgene_J1 = glm(Binary_Score ~ Treatment,
+                    data = J1_trees,
+                    family = binomial(link = 'logit'))
+
+summary(glm_Transgene_J1)
+```
+
+```{r}
+predict(glm_Transgene_J1, type = 'response')
+```
+
+
+
+```{r}
+glm_Transgene_J21 = glm(Binary_Score ~ Treatment,
+                    data = dat_of_interest %>% 
+                      filter(Background == 'J21'),
+                    family = binomial(link = 'logit'))
+
+summary(glm_Transgene_J21)
+```
+
+```{r}
+glm_Transgene_RR4 = glm(Binary_Score ~ Treatment,
+                    data = dat_of_interest %>% 
+                      filter(Background == 'RR4'),
+                    family = binomial(link = 'logit'))
+
+summary(glm_Transgene_RR4)
+```
+
+
+```{r}
+prob_of_infection = dat_of_interest %>% 
+  drop_na() %>% 
+  mutate(`Probability of Infection` = predict(glm_Transgene, type = "response")) %>% 
+  distinct(Background,
+           Treatment,
+           `Probability of Infection`)
+```
+
+
+
+
+```{r}
+dat_trans = dat %>% 
+  mutate(Norm_Score = scale(Score)) %>% 
+  group_by(Background,
+           Treatment) %>% 
+  mutate(reps = sum(!is.na(Score)))
+
+ggplot(dat_trans, 
+       aes(reorder(Treatment, Norm_Score), Norm_Score))+
+  geom_boxplot()+
+  theme_prism()+
+  theme(axis.text.x = element_text(angle = 30),
+        plot.margin = margin(10,
+                             10,
+                             10,
+                             10,
+                             unit = 'mm'))
+```
+
+```{r}
+ggplot(dat, 
+       aes(reorder(Treatment, Score), Score))+
+  geom_boxplot()+
+  theme_prism()+
+  theme(axis.text.x = element_text(angle = 30),
+        plot.margin = margin(10,
+                             10,
+                             10,
+                             10,
+                             unit = 'mm'))
+```
+
+
