@@ -204,35 +204,6 @@ long2 = long %>%
 #        'DGEresults/Fig3_1A_dat.csv')
 ```
 
-```{r}
-wide = long2 %>% 
-  pivot_wider(names_from = chromosome2,
-              values_from = c(percent,
-                              sum_counts)) %>% 
-  arrange(desc(percent_pDE00.0201_resequenced))
-
-# Create the Excel file
-wb <- createWorkbook()
-
-addWorksheet(wb, "Counts_by_Chromosome")
-
-# Write the data frame to the Excel file
-writeData(wb, 
-          "Counts_by_Chromosome", 
-          wide)
-
-# Add filters to the worksheet
-addFilter(wb, 
-          "Counts_by_Chromosome",
-          rows = 1,
-          cols = 1:ncol(wide))
-
-# Save the workbook to an .xlsx file
-saveWorkbook(wb, 
-             file = "DGEresults/Fig3_1A_percentages_table.xlsx", 
-             overwrite = TRUE)
-```
-
 
 ```{r, fig.width=13, fig.height=5}
 # p = ggplot(long2, aes(Sample, sum_counts,
