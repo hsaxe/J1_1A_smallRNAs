@@ -1,0 +1,813 @@
+---
+title: "J1_1A_mapped_to_Walnut2.0_and_C58"
+author: "Houston Saxe"
+date: "1/28/2022"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load neccessary libraries
+```{r echo=TRUE}
+pacman::p_load(base,
+               edgeR,
+               tidytable,
+               data.table,
+               dplyr,
+               stats,
+               ggpubr,
+               tidyr,
+               ggplot2,
+               ggprism,
+               limma,
+               OmicsAnalyst,
+               sjPlot,
+               tibble,
+               tidytext,
+               utils,
+               statmod,
+               stringr,
+               openxlsx)
+```
+
+# Read in and prepare expression data
+```{r}
+dat = fread('J1_1A_strict_bwa_mapped_to_Jr2.0_C58_pDE00.0201_resequenced_no_rRNAs.txt') %>% 
+  mutate(GeneID = gsub('LOC', '', GeneID))
+
+head(dat)
+```
+
+```{r}
+long = dat %>% 
+  pivot_longer(!GeneID,
+               names_to = 'Sample',
+               values_to = 'Counts')
+
+ggplot(long,
+       aes(Counts, color = Sample))+
+  geom_density()
+```
+
+
+# Read in metadata
+```{r}
+metadata = data.frame(Sample = colnames(dat)[2:length(colnames(dat))]) %>% 
+  mutate(Treatment = str_extract(Sample, 'J1-1A|J1-C') %>% 
+           gsub('-', '\\.', .),
+         Tissue = str_extract(Sample, 'R|S|U') %>% 
+           factor(., levels = c('S', 'U', 'R')),
+         Treatment_Tissue = paste(Treatment, Tissue, sep = '_') %>% 
+           factor(., levels = c('J1.1A_R', 'J1.1A_U', 'J1.1A_S',
+                                'J1.C_R', 'J1.C_U', 'J1.C_S'))) %>% 
+  column_to_rownames('Sample')
+
+head(metadata)
+
+fwrite(metadata %>% 
+         rownames_to_column(var = 'Sample'),
+       'Plotting/metadata.csv')
+```
+
+## Limma needs GeneIDs as rownames in expression data. Also, colnames of expression data need to match rownames of metadata
+```{r}
+dat1 = dat %>%
+  column_to_rownames(var =  "GeneID") %>%
+  as.matrix()
+
+# dat1 = dat1[ , paste(1:ncol(dat1))]
+
+## Do colnames in data match rownames in metadata? If they don't, use match(x,y) produces the order of y required to match the order of x
+
+all(colnames(dat1) == rownames(metadata))
+# Names match
+
+# If they didn't match, use below code
+## What order do rows of metadat need to be in to match colnames of dat1?
+# match(colnames(dat1), rownames(metadata))
+
+## Reset rownames
+# metadata = metadata[match(colnames(dat1), rownames(metadata)),]
+
+# all(colnames(dat1) == rownames(metadata))
+# now they match
+```
+
+
+## Walnut2.0 and C58 annotation
+```{r}
+annotation_Jr = fread("C:/Users/hsaxe/Box/ALAB/Genome_info/Genomic_Annotation_2/Jr/Jr_Genomic_annotation.csv") %>% 
+  select(!end) %>% 
+  mutate(Species = 'J. regia')
+
+annotation_C58 = fread("C:/Users/hsaxe/Box/ALAB/Genome_info/Genomic_Annotation_2/C58/C58_Genomic_annotation.csv") %>% 
+  mutate(Species = 'A. tumefaciens C58')
+
+old_pDE_GeneIDS = dat %>%
+  tail(n = 19) %>% 
+  select(GeneID) 
+
+annotation_pDE00.0201 = fread('../bash_work/Results/J1_1A_TDNA_resequenced.gtf') %>% 
+  select(V9,
+         V3,
+         V4,
+         V5) %>% 
+  rename(GeneID = V9,
+         feature = V3,
+         start = V4,
+         end = V5) %>% 
+  mutate(chromosome = 'pDE00.0201_resequenced',
+         exonic_length = end - start,
+         New_GeneID = str_match(GeneID, 'gene_id "(.*)";')[,2] %>% 
+           gsub('\\s$', '', .),
+         name = New_GeneID,
+         Species = 'Plasmid') %>%  
+  select(New_GeneID,
+         feature,
+         exonic_length, 
+         chromosome,
+         name, 
+         Species) %>% 
+  cbind(old_pDE_GeneIDS) %>% 
+  relocate(GeneID,
+           .after = New_GeneID)
+
+annotation = rbind(annotation_Jr,
+                   annotation_C58,
+                   annotation_pDE00.0201,
+                   fill = T) %>% 
+  filter(feature != 'mRNA') %>% 
+  select(!product_accession) %>% 
+  mutate(name = gsub(' isoform X.', '', name))
+
+fwrite(annotation,
+       'Plotting/annotation.csv')
+
+
+
+
+## Extract everything but class mRNA and other isoforms. This reduces duplication in the data
+# annotation_Jr = annotation_Jr %>%
+#   filter(feature != "mRNA", !grepl('\\sX[2-9]$|\\sX1[0-9]$', name)) %>%
+#   mutate(GeneID = as.character(GeneID)) %>% 
+#   mutate(Parent_haplotype = "J.regia")
+# 
+# head(annotation_Jr)
+# 
+# fwrite(annotation_Jr %>% 
+#          select(GeneID) %>% 
+#          mutate(GeneID = paste0('LOC', GeneID)),
+#        'Annotate_annotation_with_GO.csv')
+# 
+# fwrite(annotation_Jr, 'Plotting/annotation.csv')
+
+```
+
+## Make data for figure 3
+```{r}
+long2 = long %>% 
+  mutate(Treatment = str_extract(Sample, 'J1-1A|J1-C') %>% 
+           gsub('-', '\\.', .),
+         Tissue = str_extract(Sample, 'R|S|U') %>% 
+           factor(., levels = c('R', 'U', 'S')),
+         Treatment_Tissue = paste(Treatment, Tissue, sep = '_') %>% 
+           factor(., levels = c('J1.1A_R', 'J1.1A_U', 'J1.1A_S',
+                                'J1.C_R', 'J1.C_U', 'J1.C_S'))) %>% 
+  left_join(annotation) %>% 
+  # filter(Species == 'A. tumefaciens C58') %>% 
+  select(Sample,
+         Counts,
+         chromosome,
+         Treatment_Tissue) %>% 
+  mutate(chromosome2 = ifelse(chromosome %like% 'At|circular|linear|Ti|pDE00.0201_resequenced', chromosome, 'J. regia')) %>% 
+  group_by(Sample,
+           chromosome2,
+           Treatment_Tissue) %>% 
+  summarise(sum_counts = sum(Counts)) %>% 
+  ungroup() %>% 
+  group_by(Sample) %>% 
+  mutate(percent = (sum_counts/sum(sum_counts))*100)
+
+# fpkm = counts %>% 
+#   left_join(annotation_1A %>% 
+#               select(GeneID, exonic_length) %>% 
+#               distinct())
+# 
+# fpkmD = fpkm %>% 
+#   mutate(across(!GeneID, ~ (.x/(exonic_length/1000))/(sum(.x)/1000000))) %>% 
+#   select(!exonic_length) %>% 
+#   drop_na()
+
+# fwrite(long2,
+#        'DGEresults/Fig3_1A_dat.csv')
+```
+
+```{r}
+wide = long2 %>% 
+  pivot_wider(names_from = chromosome2,
+              values_from = c(percent,
+                              sum_counts)) %>% 
+  arrange(desc(percent_pDE00.0201_resequenced))
+
+# Create the Excel file
+wb <- createWorkbook()
+
+addWorksheet(wb, "Counts_by_Chromosome")
+
+# Write the data frame to the Excel file
+writeData(wb, 
+          "Counts_by_Chromosome", 
+          wide)
+
+# Add filters to the worksheet
+addFilter(wb, 
+          "Counts_by_Chromosome",
+          rows = 1,
+          cols = 1:ncol(wide))
+
+# Save the workbook to an .xlsx file
+saveWorkbook(wb, 
+             file = "DGEresults/Fig3_1A_percentages_table.xlsx", 
+             overwrite = TRUE)
+```
+
+
+```{r, fig.width=13, fig.height=5}
+# p = ggplot(long2, aes(Sample, sum_counts,
+#                       fill = chromosome))+
+#   geom_col()+
+#   theme_gray(base_size = 15)+
+#   theme(axis.text.x = element_text(angle = 45,
+#                                    face = 'bold',
+#                                    vjust = 1,
+#                                    hjust = 1))+
+#   facet_wrap(~Treatment_Tissue,
+#              nrow = 1,
+#              scales = 'free_x')
+# 
+# p
+```
+
+```{r}
+# save_plot('Fig_3B.png',
+#           p,
+#           width = 30,
+#           height = 15)
+```
+
+
+# Create DGEList object
+```{r}
+library(edgeR)
+
+dds = DGEList(dat1)
+
+dim(dds$counts)
+
+## Calculate library normalization factors (does not do anything to data)
+dds = calcNormFactors(dds)
+
+## These are the size factors (normalization factors) for each sample
+dds$samples
+```
+
+
+## Filter by top 1,000 genes by interquartile range (IQR) (This is used for DGE analysis)
+```{r}
+## The counts for this analysis are so low that CPM normalization inflates the count number higher. For example, 1/0.0005 = 2,000. As seen above the library sizes are around 0.0005 million. So that is the 'per million' scaling factor. 
+
+## Given the info above, I decided a ranked filtering by mean would be better.
+d = expression_filter(dds, 
+                      DGEList = T, 
+                      # CPH = T,
+                      FilterFUN = IQR, 
+                      RankThreshold = 1000) 
+  # as.DGEList()
+
+## CPM normalized counts of all data
+# cpm = cpm(dds, prior.count = 2, log = F) 
+# 
+# cpm = cpm %>% 
+#   data.frame() %>% 
+#   rownames_to_column(var = 'GeneID') %>%  
+#   rename_with(~ gsub('X', '', gsub('\\.', '-', .x))) %>% 
+#   filter(!stringr::str_detect(GeneID,'TRNA|AT'))
+# 
+
+
+# CPM normalized counts of all data
+cpmdds = cpm(dds) %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var = 'GeneID')
+
+fwrite(cpmdds, 'Plotting/cpm_plotting_data.csv')
+
+raw_counts = dds$counts %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var = 'GeneID')
+
+fwrite(raw_counts,
+       'Plotting/raw_counts.csv')
+
+# A significant proportion of filtered data is rRNA (39%)
+rRNAs_filtered = d$dat$counts %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var = 'GeneID') %>% 
+  left_join(annotation) %>% 
+  filter(name %like% 'ribosomal')
+
+# CPM normalized counts of filtered data
+cpmd = cpm(d$dat)
+# 
+# fwrite(cpmd %>% data.frame() %>% rownames_to_column(var = 'GeneID'), 'DGEresults/DGE_CPM_data.csv')
+
+# View(d$counts)
+```
+
+# Make TPM data for figure 3
+```{r}
+
+TPM = raw_counts %>% 
+  left_join(annotation %>% 
+              select(GeneID, exonic_length) %>% 
+              distinct())
+
+TPMD = TPM %>% 
+  drop_na() %>% 
+  mutate(across(!GeneID, ~ (.x/(exonic_length/1000))/(sum(.x/(exonic_length/1000))/1000000))) %>% 
+  select(!exonic_length)
+
+# All sample sums should now be 1,000,000. 
+TPMD %>% 
+  summarise(across(where(is.numeric), ~ sum(.x)))
+
+long = TPMD %>% 
+  pivot_longer(!GeneID,
+               names_to = 'Sample',
+               values_to = 'TPM')
+
+
+long2 = long %>% 
+  mutate(Treatment = str_extract(Sample, 'J1-1A|J1-C') %>% 
+           gsub('-', '\\.', .),
+         Tissue = str_extract(Sample, 'R|S|U') %>% 
+           factor(., levels = c('R', 'U', 'S')),
+         Treatment_Tissue = paste(Treatment, Tissue, sep = '_') %>% 
+           factor(., levels = c('J1.1A_R', 'J1.1A_U', 'J1.1A_S',
+                                'J1.C_R', 'J1.C_U', 'J1.C_S'))) %>% 
+  left_join(annotation) %>%
+  # Need to include GeneID because enought GeneIDs have the same TPM to skew the sum_TPM calculation so that all samples do not equal 1,000,000
+  select(Sample,
+         GeneID,
+         New_GeneID,
+         TPM,
+         chromosome,
+         Treatment_Tissue) %>% 
+  distinct() %>% 
+  mutate(chromosome2 = ifelse(chromosome %like% 'At|circular|linear|Ti|pDE00.0201', chromosome, 'J. regia')) %>%
+  summarise(sum_TPM = sum(TPM),
+            .by = c(Sample,
+           chromosome2,
+           Treatment_Tissue)) %>%
+  mutate(percent_of_total = (sum_TPM/sum(sum_TPM))*100,
+            .by = Sample)
+
+  # group_by(Sample) %>% 
+  # mutate(percent = (sum_counts/sum(sum_counts))*100)
+
+long2 %>% 
+  summarise(sum_TPM = sum(sum_TPM),
+            .by = Sample)
+
+# long2 %>% 
+#   summarise(sum_TPM = sum(TPM),
+#             .by = Sample)
+
+
+fwrite(long2,
+       'DGEresults/Fig3_1A_dat.csv')
+```
+
+## Plot PCA to look in R
+```{r}
+pca = plot_pca(cpmd, metadata %>% 
+                 rownames_to_column('Sample'),
+               join_by_name = 'Sample',
+               plotting_factors_in = 'col_names',
+               # Using 'Group' here becuase 'Hybrid' is already in metadata. Will cause error if I used 'Hybrid'
+               plotting_factors_name = Group, 
+               x = 'PC1',
+               y = 'PC2',
+               scale = T, 
+               center = T, 
+               color = 'Treatment_Tissue',
+               fill = 'Treatment_Tissue',
+               plot_type = '2D')
+```
+
+```{r}
+pca$plot +
+  geom_polygon(alpha = 0.5)
+
+# scale_fill_manual(values = c('wheat', 'wheat3', 'wheat4',
+#                                'darkorange', 'darkorange3', 'darkorange4', 
+#                                'red', 'red3', 'red4'))+
+#   scale_color_manual(values = c('wheat', 'wheat3', 'wheat4',
+#                                'darkorange', 'darkorange3', 'darkorange4', 
+#                                'red', 'red3', 'red4'))
+```
+
+## Plot PCA to look in R
+```{r}
+pca = plot_pca(cpmd, metadata %>% 
+                 rownames_to_column('Sample'),
+               join_by_name = 'Sample',
+               plotting_factors_in = 'col_names',
+               # Using 'Group' here becuase 'Hybrid' is already in metadata. Will cause error if I used 'Hybrid'
+               plotting_factors_name = Group, 
+               x = 'PC1',
+               y = 'PC2',
+               scale = T, 
+               center = T, 
+               color = 'Treatment',
+               fill = 'Treatment',
+               plot_type = '2D')
+```
+
+```{r}
+pca$plot 
+
+# scale_fill_manual(values = c('wheat', 'wheat3', 'wheat4',
+#                                'darkorange', 'darkorange3', 'darkorange4', 
+#                                'red', 'red3', 'red4'))+
+#   scale_color_manual(values = c('wheat', 'wheat3', 'wheat4',
+#                                'darkorange', 'darkorange3', 'darkorange4', 
+#                                'red', 'red3', 'red4'))
+```
+
+## Plot PCA to look in R
+```{r}
+pca = plot_pca(cpmd, metadata %>% 
+                 rownames_to_column('Sample'),
+               join_by_name = 'Sample',
+               plotting_factors_in = 'col_names',
+               # Using 'Group' here becuase 'Hybrid' is already in metadata. Will cause error if I used 'Hybrid'
+               plotting_factors_name = Group, 
+               x = 'PC1',
+               y = 'PC2',
+               scale = T, 
+               center = T, 
+               color = 'Tissue',
+               fill = 'Tissue',
+               plot_type = '2D')
+```
+
+```{r}
+pca$plot 
+
+# scale_fill_manual(values = c('wheat', 'wheat3', 'wheat4',
+#                                'darkorange', 'darkorange3', 'darkorange4', 
+#                                'red', 'red3', 'red4'))+
+#   scale_color_manual(values = c('wheat', 'wheat3', 'wheat4',
+#                                'darkorange', 'darkorange3', 'darkorange4', 
+#                                'red', 'red3', 'red4'))
+```
+
+
+# Differential expression analysis
+
+
+# Make model matrix for transgenic effects
+```{r}
+mm_Treatment_Tissue = model.matrix(~Treatment_Tissue-1, data = metadata)
+
+colnames(mm_Treatment_Tissue) = gsub('Treatment_Tissue', '', colnames(mm_Treatment_Tissue))
+
+
+head(mm_Treatment_Tissue)
+```
+
+## What is voom?
+
+## 1. Counts are transformed to log2 counts per million reads (CPM), where "per million reads" is defined based on the normalization factors we calculated earlier.
+## 2. A linear model is fitted to the log2 CPM for each gene, and the residuals are calculated.
+## 3. A smoothed curve is fitted to the sqrt(residual standard deviation) by average expression.
+## (see red line in plot below)
+## 4. The smoothed curve is used to obtain weights for each gene and sample that are passed into limma along with the log2 CPMs.
+
+## More details at "[voom: precision weights unlock linear model analysis tools for RNA-seq read counts](https://genomebiology.biomedcentral.com/articles/10.1186/gb-2014-15-2-r29)"
+
+## Filtered mean-variance trend Treatment_Tissue
+```{r}
+y_Treatment_Tissue <- voom(d$dat, mm_Treatment_Tissue , plot = T)
+```
+
+## Fitting linear models in limma with random effects Treatment_Tissue
+```{r}
+## Need to tell limma where the within class correlation is coming from
+dupcor_Treatment_Tissue = duplicateCorrelation(y_Treatment_Tissue,
+                                 mm_Treatment_Tissue,
+                                 block = metadata$Treatment_Tissue)
+
+## How correlated are the hybrid replicates on average?
+consensus.corr.Treatment_Tissue = dupcor_Treatment_Tissue$consensus.correlation
+
+consensus.corr.Treatment_Tissue
+
+# lmFit fits a linear model using weighted least squares for each gene:
+fit_Treatment_Tissue = lmFit(y_Treatment_Tissue, 
+               design = mm_Treatment_Tissue,
+               block = metadata$Treatment_Tissue, 
+               correlation = consensus.corr.Treatment_Tissue) 
+```
+
+## Make contrasts
+```{r}
+comps = c('J1.1A_R-J1.C_R', 
+          'J1.1A_U-J1.C_U', 
+          'J1.1A_S-J1.C_S')
+
+contrasts = makeContrasts(contrasts = comps, 
+                          levels = levels(metadata$Treatment_Tissue))
+
+fit_contrasts = contrasts.fit(fit_Treatment_Tissue, contrasts = contrasts)
+```
+
+## The variance characteristics of low expressed genes are different from high expressed genes, if treated the same, the effect is to over represent low expressed genes in the DE list. This is corrected for by the log transformation and voom. However, some genes will have increased or decreased variance that is not a result of low expression, but due to other random factors. We are going to run empirical Bayes to adjust the variance of these genes.
+
+## Empirical Bayes smoothing of standard errors (shifts standard errors that are much larger or smaller than those from other genes towards the average standard error) (see "[Linear Models and Empirical Bayes Methods for Assessing Differential Expression in Microarray Experiments](https://www.degruyter.com/doi/10.2202/1544-6115.1027)"
+```{r}
+BlockFit = eBayes(fit_contrasts)
+
+```
+
+
+# Limma results Treatment_Tissue
+```{r}
+res_summaries = BlockFit %>% 
+  decideTests() %>% 
+  summary() %>% 
+  as.data.frame() %>% 
+  pivot_wider(names_from = Var2,
+              values_from = Freq) %>% 
+  rename(Direction = Var1)
+
+res_summaries
+```
+
+# Create workbook and write results summary
+```{r}
+Ann_Res = createWorkbook()
+
+addWorksheet(Ann_Res, 'Results Summary')
+
+writeData(Ann_Res,
+          'Results Summary',
+          res_summaries,
+          withFilter = T)
+```
+
+
+```{r}
+coef(BlockFit) %>% 
+  colnames()
+```
+
+
+```{r}
+impJ1.1A_R.J1.C_R = limma::topTable(BlockFit,
+                        # sort.by = "logFC",
+                        p.value = 0.05,
+                        adjust.method = "BH",
+                        number = Inf,
+                        coef = 'J1.1A_R-J1.C_R') %>%
+  rownames_to_column(var = 'GeneID') %>% 
+  mutate(R = sqrt(t^2/(t^2 + 40)), AveExpr = 2^AveExpr) %>% 
+  arrange(adj.P.Val) %>%
+  left_join(annotation, by = "GeneID") %>% 
+  select(!c(B,
+            t,
+            P.Value)) %>% 
+  distinct()
+
+```
+
+# Save J-R.C-R results sheet
+```{r}
+addWorksheet(Ann_Res, 'J1-1A J1.1A_R vs J1.C_R')
+
+writeData(Ann_Res,
+          'J1-1A J1.1A_R vs J1.C_R',
+          impJ1.1A_R.J1.C_R,
+          withFilter = T)
+```
+
+## PCA of J1.1A_R.J1.C_R DEGs
+```{r}
+ids = impJ1.1A_R.J1.C_R %>%
+  filter(adj.P.Val < 0.05) %>%
+  distinct(GeneID)
+
+PCA_J1.1A_R.J1.C_R = cpmd %>%
+  data.frame() %>%
+  rownames_to_column(var = 'GeneID') %>%
+  right_join(ids) %>%
+  column_to_rownames(var = 'GeneID') 
+
+pca_plot_J1.1A_R.J1.C_R = plot_pca(PCA_J1.1A_R.J1.C_R,
+                                     metadata %>% 
+                                       rownames_to_column(var = 'Sample'),
+                                     join_by_name = 'Sample',
+                                     plotting_factors_in = 'col_names',
+                                     plotting_factors_name = Group,
+                                     x = 'PC1',
+                                     y = 'PC2',
+                                     scale = T,
+                                     center = T,
+                                     color = 'Treatment_Tissue',
+                                     fill = 'Treatment_Tissue',
+                                     plot_type = '2D',
+                                     sep = '-')
+
+pca_plot_J1.1A_R.J1.C_R$plot+
+  geom_polygon(alpha = 0.5)
+
+# View(pca_plot_J1.1A_R.J1.C_R$plot_dat)
+```
+
+
+```{r}
+impJ1.1A_U.J1.C_U = limma::topTable(BlockFit,
+                        # sort.by = "logFC",
+                        p.value = 0.05,
+                        adjust.method = "BH",
+                        number = Inf,
+                        coef = 'J1.1A_U-J1.C_U') %>%
+  rownames_to_column(var = 'GeneID') %>% 
+  mutate(R = sqrt(t^2/(t^2 + 40)), AveExpr = 2^AveExpr) %>% 
+  arrange(adj.P.Val) %>%
+  left_join(annotation, by = "GeneID") %>% 
+  select(!c(B,
+            t,
+            P.Value))
+```
+
+## PCA of Treatment_Tissue DEGs
+```{r}
+ids = impJ1.1A_U.J1.C_U %>%
+  filter(adj.P.Val < 0.05) %>%
+  distinct(GeneID)
+
+PCA_impJ1.1A_U.J1.C_U = cpmd %>%
+  data.frame() %>%
+  rownames_to_column(var = 'GeneID') %>%
+  right_join(ids) %>%
+  column_to_rownames(var = 'GeneID') 
+
+pca_plot_impJ1.1A_U.J1.C_U = plot_pca(PCA_impJ1.1A_U.J1.C_U,
+                                     metadata %>% 
+                                       rownames_to_column(var = 'Sample'),
+                                     join_by_name = 'Sample',
+                                     plotting_factors_in = 'col_names',
+                                     plotting_factors_name = Group,
+                                     x = 'PC1',
+                                     y = 'PC2',
+                                     scale = T,
+                                     center = T,
+                                     color = 'Treatment_Tissue',
+                                     fill = 'Treatment_Tissue',
+                                     plot_type = '2D',
+                                     sep = '-')
+
+pca_plot_impJ1.1A_U.J1.C_U$plot+
+  geom_polygon(alpha = 0.5)
+
+# View(pca_plot_Treatment_Tissue$plot_dat)
+```
+
+## Save J-U.C-U results sheet
+```{r}
+addWorksheet(Ann_Res, 'J1-1A J1.1A_U vs J1.C_U')
+
+writeData(Ann_Res,
+          'J1-1A J1.1A_U vs J1.C_U',
+          impJ1.1A_U.J1.C_U,
+          withFilter = T)
+
+```
+
+# Save results workbook
+```{r}
+saveWorkbook(Ann_Res, 
+             'DGEresults/Limma_sig_results_table_J1-1A.xlsx',
+             overwrite = T)
+```
+
+#Plot iaam and ipt
+```{r, fig.width=8}
+plotdat = cpmdds %>% 
+  data.frame() %>% 
+  rownames_to_column("GeneID") %>% 
+  pivot_longer(!GeneID, 
+               names_to = 'Sample',
+               values_to = 'Expression') %>% 
+  filter(GeneID %like% 'ATU_RS23060|ATU_RS23055') %>% 
+  mutate(Sample = gsub('\\.', '-', Sample)) %>% 
+  left_join(metadata %>% rownames_to_column('Sample') %>% 
+              mutate(Sample = gsub('\\.', '-', Sample))) %>% 
+  left_join(annotation)
+
+ggplot(plotdat,
+       aes(Treatment, Expression,
+           fill = Tissue))+
+  geom_boxplot()+
+  scale_fill_viridis_d(begin = 0.5, end = 1)+
+  theme_prism()+
+  facet_wrap(~GeneID,
+             scales = 'free')
+
+```
+
+```{r, fig.width=10}
+plotdat = cpmdds %>% 
+  data.frame() %>% 
+  rownames_to_column("GeneID") %>% 
+  pivot_longer(!GeneID, 
+               names_to = 'Sample',
+               values_to = 'Expression') %>% 
+  filter(GeneID %like% 'iaa_M|ipt') %>% 
+  mutate(Sample = gsub('\\.', '-', Sample)) %>% 
+  left_join(metadata %>% rownames_to_column('Sample') %>% 
+              mutate(Sample = gsub('\\.', '-', Sample))) %>% 
+  left_join(annotation)
+
+ggplot(plotdat,
+       aes(Treatment, Expression,
+           fill = Tissue))+
+  geom_boxplot()+
+  scale_fill_viridis_d(begin = 0.5, end = 1)+
+  theme_prism()+
+  facet_wrap(~GeneID,
+             scales = 'free')
+```
+
+
+```{r, fig.width=8}
+plotdat = cpmdds %>% 
+  data.frame() %>% 
+  rownames_to_column("GeneID") %>% 
+  pivot_longer(!GeneID, 
+               names_to = 'Sample',
+               values_to = 'Expression') %>% 
+  filter(GeneID %like% 'GUS|npt') %>% 
+  mutate(Sample = gsub('\\.', '-', Sample)) %>% 
+  left_join(metadata %>% rownames_to_column('Sample') %>% 
+              mutate(Sample = gsub('\\.', '-', Sample))) %>% 
+  left_join(annotation)
+
+ggplot(plotdat,
+       aes(Treatment, Expression,
+           fill = Tissue))+
+  geom_boxplot()+
+  scale_fill_viridis_d(begin = 0.5, end = 1)+
+  theme_prism()+
+  facet_wrap(~GeneID,
+             scales = 'free')
+```
+
+
+
+## Read in Treatment_Tissue results
+```{r}
+impTreatment_Tissue = fread('DGEresults/Limma_results_table_Treatment_Tissue.csv')
+```
+
+## Volcano plot
+```{r}
+labs = impTreatment_Tissue %>% 
+  distinct(logFC, P.Value, name) %>% 
+  slice_min(order_by = logFC, n = 5) %>% 
+  rbind(impTreatment_Tissue %>% 
+  distinct(logFC, P.Value, name) %>% 
+    slice_max(order_by = logFC, n = 5))
+      
+
+ggplot(impTreatment_Tissue %>% 
+         distinct(logFC, P.Value, name), aes(logFC, log10(P.Value)*-1, color = logFC))+
+  geom_point()+
+  labs(color = 'J1-C/J1-1A\nLogFC')+
+  ggrepel::geom_label_repel(data = labs, aes(label = name), size = 3, color = 'black', box.padding = 0.4, label.padding = 0.1, max.overlaps = Inf)+
+  geom_hline(yintercept = log10(0.05)*-1, linetype = 'dashed', color = 'red')+
+  geom_text(aes(min(logFC), log10(0.05)*-1), label = 'FDR 0.05', vjust = -1)+
+  geom_vline(xintercept = 0, linetype = 'dashed', color = 'black')+
+  geom_hline(yintercept = 0, linetype = 'dashed', color = 'black')+
+  # lims(y = c(-1, max(log10(plot_dat$fdr)*-1)))+
+  scale_color_gradient2(low = 'blue', high = 'red')
+```
+
+
+
+
+
